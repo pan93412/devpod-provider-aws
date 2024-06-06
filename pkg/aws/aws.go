@@ -478,10 +478,6 @@ func CreateDevpodSecurityGroup(ctx context.Context, provider *AwsProvider) (stri
 	return groupID, nil
 }
 
-// GetDevpodInstance returns the instance with the given name
-//
-// You should get the instance with GetDevpodInstanceByLaunchTemplate
-// if the DevPod is created with a launch template (new approach).
 func GetDevpodInstance(
 	ctx context.Context,
 	cfg aws.Config,
