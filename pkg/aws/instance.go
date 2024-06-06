@@ -29,6 +29,7 @@ func NewOnDemandInstanceBuilder(launchTemplateName string, subnetID string) *OnD
 		runInstanceInput: &ec2.RunInstancesInput{
 			LaunchTemplate: &types.LaunchTemplateSpecification{
 				LaunchTemplateName: &launchTemplateName,
+				Version:            aws.String("$Latest"),
 			},
 			SubnetId: aws.String(subnetID),
 		},
@@ -68,6 +69,7 @@ func NewSpotInstanceBuilder(launchTemplateName string, subnetID string) *SpotIns
 				{
 					LaunchTemplateSpecification: &types.FleetLaunchTemplateSpecificationRequest{
 						LaunchTemplateName: &launchTemplateName,
+						Version:            aws.String("$Latest"),
 					},
 					Overrides: []types.FleetLaunchTemplateOverridesRequest{
 						{
