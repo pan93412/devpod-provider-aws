@@ -86,7 +86,7 @@ func NewSpotInstanceBuilder(launchTemplateName string, subnetID string) *SpotIns
 				TotalTargetCapacity:       aws.Int32(1),
 				DefaultTargetCapacityType: types.DefaultTargetCapacityTypeSpot,
 			},
-			Type: types.FleetTypeInstant,
+			Type: types.FleetTypeRequest,
 		},
 	}
 }
