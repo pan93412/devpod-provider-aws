@@ -80,7 +80,10 @@ func NewSpotInstanceBuilder(launchTemplateName string, subnetID string) *SpotIns
 				InstanceInterruptionBehavior: types.SpotInstanceInterruptionBehaviorStop,
 				InstancePoolsToUseCount:      aws.Int32(1),
 			},
-
+			TargetCapacitySpecification: &types.TargetCapacitySpecificationRequest{
+				TotalTargetCapacity:       aws.Int32(1),
+				DefaultTargetCapacityType: types.DefaultTargetCapacityTypeSpot,
+			},
 			Type: types.FleetTypeInstant,
 		},
 	}
