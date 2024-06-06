@@ -32,6 +32,8 @@ func NewOnDemandInstanceBuilder(launchTemplateName string, subnetID string) *OnD
 				Version:            aws.String("$Latest"),
 			},
 			SubnetId: aws.String(subnetID),
+			MinCount: aws.Int32(1),
+			MaxCount: aws.Int32(1),
 		},
 	}
 }
