@@ -6,7 +6,6 @@ import (
 	"github.com/loft-sh/devpod-provider-aws/pkg/aws"
 	"github.com/loft-sh/devpod/pkg/log"
 	"github.com/loft-sh/devpod/pkg/provider"
-	"github.com/pkg/errors"
 	"github.com/spf13/cobra"
 )
 
@@ -55,14 +54,9 @@ func (cmd *StartCmd) Run(
 
 	if len(instances.Reservations) > 0 {
 		targetID := instances.Reservations[0].Instances[0].InstanceId
-
-		err = aws.Start(ctx, providerAws.AwsConfig, *targetID)
-		if err != nil {
-			return err
-		}
-	} else {
-		return errors.Errorf("No stopped instance %s found", providerAws.Config.MachineID)
+		return aws.Start(ctx, providerAws.AwsConfig, *targetID)
 	}
 
-	return nil
+	// re-create a new instance if there is no stopped instance
+	return aws.CreateFromExistingLaunchTemplate(ctx, providerAws, "")
 }
