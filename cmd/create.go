@@ -49,7 +49,7 @@ func (cmd *CreateCmd) Run(
 		return err
 	}
 
-	_, err = aws.Create(ctx, providerAws.AwsConfig, providerAws)
+	err = aws.Create(ctx, providerAws.AwsConfig, providerAws)
 	if err != nil {
 		return err
 	}

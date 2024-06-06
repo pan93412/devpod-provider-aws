@@ -53,15 +53,17 @@ func (cmd *DeleteCmd) Run(
 		return err
 	}
 
-	if len(instances.Reservations) > 0 {
-		targetID := instances.Reservations[0].Instances[0].InstanceId
+	machineID := providerAws.Config.MachineID
 
-		err = aws.Delete(ctx, providerAws.AwsConfig, *targetID)
+	if len(instances.Reservations) > 0 {
+		instance := instances.Reservations[0].Instances[0]
+
+		err = aws.Delete(ctx, providerAws.AwsConfig, instance, machineID)
 		if err != nil {
 			return err
 		}
 	} else {
-		return errors.Errorf("No devpod instance %s found", providerAws.Config.MachineID)
+		return errors.Errorf("No devpod instance %s found", machineID)
 	}
 
 	return nil

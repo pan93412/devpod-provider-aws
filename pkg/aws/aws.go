@@ -3,7 +3,6 @@ package aws
 import (
 	"context"
 	"encoding/base64"
-	"fmt"
 	"net/http"
 	"regexp"
 	"sort"
@@ -479,6 +478,10 @@ func CreateDevpodSecurityGroup(ctx context.Context, provider *AwsProvider) (stri
 	return groupID, nil
 }
 
+// GetDevpodInstance returns the instance with the given name
+//
+// You should get the instance with GetDevpodInstanceByLaunchTemplate
+// if the DevPod is created with a launch template (new approach).
 func GetDevpodInstance(
 	ctx context.Context,
 	cfg aws.Config,
@@ -600,8 +603,8 @@ func GetDevpodRunningInstance(
 	return result, nil
 }
 
-func GetInstanceTags(providerAws *AwsProvider) []types.TagSpecification {
-	result := []types.TagSpecification{
+func GetInstanceTags(providerAws *AwsProvider) []types.LaunchTemplateTagSpecificationRequest {
+	result := []types.LaunchTemplateTagSpecificationRequest{
 		{
 			ResourceType: "instance",
 			Tags: []types.Tag{
@@ -641,83 +644,71 @@ func Create(
 	ctx context.Context,
 	cfg aws.Config,
 	providerAws *AwsProvider,
-) (*ec2.RunInstancesOutput, error) {
+) error {
 	svc := ec2.NewFromConfig(cfg)
 
 	devpodSG, err := GetDevpodSecurityGroups(ctx, providerAws)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	volSizeI32 := int32(providerAws.Config.DiskSizeGB)
 
 	userData, err := GetInjectKeypairScript(providerAws.Config.MachineFolder)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	instance := &ec2.RunInstancesInput{
-		ImageId:          aws.String(providerAws.Config.DiskImage),
-		InstanceType:     types.InstanceType(providerAws.Config.MachineType),
-		MinCount:         aws.Int32(1),
-		MaxCount:         aws.Int32(1),
-		SecurityGroupIds: devpodSG,
-		MetadataOptions: &types.InstanceMetadataOptionsRequest{
-			HttpEndpoint:            types.InstanceMetadataEndpointStateEnabled,
-			HttpTokens:              types.HttpTokensStateRequired,
-			HttpPutResponseHopLimit: aws.Int32(1),
-		},
-		BlockDeviceMappings: []types.BlockDeviceMapping{
-			{
-				DeviceName: aws.String(providerAws.Config.RootDevice),
-				Ebs: &types.EbsBlockDevice{
-					VolumeSize: &volSizeI32,
+	// create a launch template for the instance
+	launchTemplate := &ec2.CreateLaunchTemplateInput{
+		LaunchTemplateData: &types.RequestLaunchTemplateData{
+			ImageId:          aws.String(providerAws.Config.DiskImage),
+			InstanceType:     types.InstanceType(providerAws.Config.MachineType),
+			SecurityGroupIds: devpodSG,
+			MetadataOptions: &types.LaunchTemplateInstanceMetadataOptionsRequest{
+				HttpEndpoint:            types.LaunchTemplateInstanceMetadataEndpointStateEnabled,
+				HttpTokens:              types.LaunchTemplateHttpTokensStateRequired,
+				HttpPutResponseHopLimit: aws.Int32(1),
+			},
+			BlockDeviceMappings: []types.LaunchTemplateBlockDeviceMappingRequest{
+				{
+					DeviceName: aws.String(providerAws.Config.RootDevice),
+					Ebs: &types.LaunchTemplateEbsBlockDeviceRequest{
+						VolumeSize: &volSizeI32,
+					},
 				},
 			},
+			TagSpecifications: GetInstanceTags(providerAws),
+			UserData:          &userData,
 		},
-		TagSpecifications: GetInstanceTags(providerAws),
-		UserData:          &userData,
+		LaunchTemplateName: aws.String(providerAws.Config.MachineID),
 	}
-	if providerAws.Config.UseSpotInstance {
-		instance.InstanceMarketOptions = &types.InstanceMarketOptionsRequest{
-			MarketType: "spot",
-			SpotOptions: &types.SpotMarketOptions{
-				SpotInstanceType:             "persistent",
-				InstanceInterruptionBehavior: "stop",
-			},
-		}
-	}
-
 	profile, err := GetDevpodInstanceProfile(ctx, providerAws)
 	if err == nil {
-		instance.IamInstanceProfile = &types.IamInstanceProfileSpecification{
+		launchTemplate.LaunchTemplateData.IamInstanceProfile = &types.LaunchTemplateIamInstanceProfileSpecificationRequest{
 			Arn: aws.String(profile),
 		}
 	}
 
-	if providerAws.Config.VpcID != "" && providerAws.Config.SubnetID == "" {
-		subnetID, err := GetSubnetID(ctx, providerAws)
-		if err != nil {
-			return nil, err
-		}
-
-		if subnetID == "" {
-			return nil, fmt.Errorf("could not find a matching SubnetID in VPC %s, please specify one", providerAws.Config.VpcID)
-		}
-
-		instance.SubnetId = &subnetID
-	}
-
-	if providerAws.Config.SubnetID != "" {
-		instance.SubnetId = &providerAws.Config.SubnetID
-	}
-
-	result, err := svc.RunInstances(ctx, instance)
+	result, err := svc.CreateLaunchTemplate(ctx, launchTemplate)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
-	return result, nil
+	var instanceBuilder InstanceBuilder
+	switch providerAws.Config.UseSpotInstance {
+	case true:
+		instanceBuilder = NewSpotInstanceBuilder(*result.LaunchTemplate.LaunchTemplateId, providerAws.Config.SubnetID)
+	case false:
+		instanceBuilder = NewOnDemandInstanceBuilder(*result.LaunchTemplate.LaunchTemplateId, providerAws.Config.SubnetID)
+	}
+
+	err = instanceBuilder.Build(ctx, svc)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func Start(ctx context.Context, cfg aws.Config, instanceID string) error {
@@ -778,17 +769,35 @@ func Status(ctx context.Context, cfg aws.Config, name string) (client.Status, er
 	}
 }
 
-func Delete(ctx context.Context, cfg aws.Config, instanceID string) error {
+func Delete(ctx context.Context, cfg aws.Config, instance types.Instance, machineID string) error {
 	svc := ec2.NewFromConfig(cfg)
 
-	input := &ec2.TerminateInstancesInput{
-		InstanceIds: []string{
-			instanceID,
-		},
+	var deleter InstanceDeleter
+
+	switch instance.InstanceLifecycle {
+	case types.InstanceLifecycleTypeSpot:
+		deleter = NewSpotInstanceDeleter(*instance.SpotInstanceRequestId)
+	default:
+		deleter = NewOnDemandInstanceDeleter(*instance.InstanceId)
 	}
 
-	_, err := svc.TerminateInstances(ctx, input)
+	err := deleter.Delete(ctx, svc)
 	if err != nil {
+		return err
+	}
+
+	_, err = svc.DeleteLaunchTemplate(ctx, &ec2.DeleteLaunchTemplateInput{
+		LaunchTemplateName: aws.String(machineID),
+	})
+	if err != nil {
+		var responseErr types.ResponseError
+		if errors.As(err, &responseErr) {
+			// fallback: if the launch template does not exist (older instance), we can ignore the error
+			if responseErr.Code == types.LaunchTemplateErrorCodeLaunchTemplateNameDoesNotExist {
+				return nil
+			}
+		}
+
 		return err
 	}
 
