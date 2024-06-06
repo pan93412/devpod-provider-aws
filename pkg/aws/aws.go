@@ -695,12 +695,38 @@ func Create(
 		return err
 	}
 
+	return CreateFromExistingLaunchTemplate(ctx, providerAws, *result.LaunchTemplate.LaunchTemplateName)
+}
+
+func CreateFromExistingLaunchTemplate(
+	ctx context.Context,
+	providerAws *AwsProvider,
+	launchTemplateName string,
+) error {
+	svc := ec2.NewFromConfig(providerAws.AwsConfig)
+
+	if launchTemplateName == "" {
+		launchTemplateName = providerAws.Config.MachineID
+	}
+
+	templates, err := svc.DescribeLaunchTemplates(ctx, &ec2.DescribeLaunchTemplatesInput{
+		LaunchTemplateNames: []string{
+			launchTemplateName,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if len(templates.LaunchTemplates) == 0 {
+		return errors.Errorf("launch template %s not found", launchTemplateName)
+	}
+
 	var instanceBuilder InstanceBuilder
 	switch providerAws.Config.UseSpotInstance {
 	case true:
-		instanceBuilder = NewSpotInstanceBuilder(*result.LaunchTemplate.LaunchTemplateId, providerAws.Config.SubnetID)
+		instanceBuilder = NewSpotInstanceBuilder(launchTemplateName, providerAws.Config.SubnetID)
 	case false:
-		instanceBuilder = NewOnDemandInstanceBuilder(*result.LaunchTemplate.LaunchTemplateId, providerAws.Config.SubnetID)
+		instanceBuilder = NewOnDemandInstanceBuilder(launchTemplateName, providerAws.Config.SubnetID)
 	}
 
 	err = instanceBuilder.Build(ctx, svc)
