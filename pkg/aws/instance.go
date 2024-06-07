@@ -81,8 +81,7 @@ func NewSpotInstanceBuilder(launchTemplateName string, subnetID string) *SpotIns
 				},
 			},
 			SpotOptions: &types.SpotOptionsRequest{
-				InstanceInterruptionBehavior: types.SpotInstanceInterruptionBehaviorStop,
-				InstancePoolsToUseCount:      aws.Int32(1),
+				AllocationStrategy: types.SpotAllocationStrategyPriceCapacityOptimized,
 			},
 			TargetCapacitySpecification: &types.TargetCapacitySpecificationRequest{
 				TotalTargetCapacity:       aws.Int32(1),
